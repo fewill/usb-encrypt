@@ -1,1 +1,10 @@
+# Claude
 .claude/
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+
+# VS Code
+.vscode/settings.json

@@ -7,6 +7,7 @@ Scripts to mount, unmount, and back up to a LUKS-encrypted USB drive on Linux, w
 - `cryptsetup`
 - `rsync`
 - `systemd`
+- `python3`
 - An encrypted USB partition at `/dev/sdc1` (created with `cryptsetup luksFormat`)
 - A mount point at `/mnt/usb` (`sudo mkdir -p /mnt/usb`)
 
@@ -41,28 +42,50 @@ All synced to `/mnt/usb/backups/`.
 
 ## Installation
 
-Copy scripts to `~/.local/bin` and ensure it is on your `PATH`:
+Clone the repo and create the virtual environment:
 
 ```bash
-mkdir -p ~/.local/bin
-cp mount-usb.sh ~/.local/bin/mount-usb
-cp umount-usb.sh ~/.local/bin/umount-usb
-cp backup-usb.sh ~/.local/bin/backup-usb
+git clone git@github.com:fewill/usb-encrypt.git
+cd usb-encrypt
+python3 -m venv .venv
 ```
 
-Add to `~/.bashrc` if `~/.local/bin` is not already on your PATH:
+Add `~/.local/bin` to your PATH if not already present:
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-## Scheduling (systemd timer)
+Run the update script to install everything:
+```bash
+.venv/bin/python update-scripts.py
+```
 
-Install the service and timer for daily automated backups:
+## Updating
+
+Pull the latest changes and re-run the update script:
 
 ```bash
-sudo cp backup-usb.service /etc/systemd/system/
-sudo cp backup-usb.timer /etc/systemd/system/
-sudo systemctl daemon-reload
+git pull && .venv/bin/python update-scripts.py
+```
+
+To update specific targets only:
+```bash
+.venv/bin/python update-scripts.py mount-usb umount-usb
+.venv/bin/python update-scripts.py backup-usb.service backup-usb.timer
+```
+
+List all available targets:
+```bash
+.venv/bin/python update-scripts.py --list
+```
+
+The update script only copies files that have changed, and automatically runs `sudo systemctl daemon-reload` if any systemd units were updated.
+
+## Scheduling (systemd timer)
+
+Enable the timer for daily automated backups:
+
+```bash
 sudo systemctl enable --now backup-usb.timer
 ```
 
