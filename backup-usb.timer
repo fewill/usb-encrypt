@@ -1,0 +1,10 @@
+[Unit]
+Description=Run encrypted USB backup daily
+Requires=backup-usb.service
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+
+[Install]
+WantedBy=timers.target

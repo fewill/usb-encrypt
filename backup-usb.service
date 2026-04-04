@@ -1,0 +1,11 @@
+[Unit]
+Description=Encrypted USB Backup
+Wants=backup-usb.timer
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/home/fewill/.local/bin/backup-usb
+
+[Install]
+WantedBy=multi-user.target
