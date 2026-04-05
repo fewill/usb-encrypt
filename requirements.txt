@@ -1,0 +1,6 @@
+credentialsmanager @ file:///home/fewill/code/credentialsmanager
+onepassword-sdk
+pyyaml>=6.0
+python-dotenv
+slack-sdk
+boto3

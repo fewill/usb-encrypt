@@ -7,6 +7,10 @@ MAPPER_DEV="/dev/mapper/$MAPPER_NAME"
 MOUNT_POINT="/mnt/usb"
 BACKUP_DEST="$MOUNT_POINT/backups"
 USER_HOME="/home/fewill"
+NOTIFY_USER="fewill"
+S3_REMOTE="s3-backup:opn-usb-backup"
+REPO_DIR="/home/fewill/code/usb-encrypt"
+PYTHON="$REPO_DIR/.venv/bin/python"
 
 # Directories to back up
 SOURCES=(
@@ -17,12 +21,27 @@ SOURCES=(
     "$USER_HOME/.config"
 )
 
+notify() {
+    local urgency="$1"
+    local message="$2"
+    sudo -u "$NOTIFY_USER" \
+        DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u $NOTIFY_USER)/bus" \
+        notify-send -u "$urgency" "USB Backup" "$message" || true
+    sudo -u "$NOTIFY_USER" "$PYTHON" "$REPO_DIR/notify_slack.py" \
+        --urgency "$urgency" "$message" || true
+}
+
+trap 'notify critical "Backup failed. Check: journalctl -u backup-usb.service"' ERR
+
 # --- Mount ---
 MOUNTED_BY_US=false
 
 if [ ! -e "$MAPPER_DEV" ]; then
     echo "Unlocking $DEVICE..."
-    cryptsetup open "$DEVICE" "$MAPPER_NAME"
+    cryptsetup open "$DEVICE" "$MAPPER_NAME" || {
+        notify critical "USB not found or failed to unlock. Is it plugged in?"
+        exit 1
+    }
 fi
 
 if ! mountpoint -q "$MOUNT_POINT"; then
@@ -62,3 +81,10 @@ if [ "$MOUNTED_BY_US" = true ]; then
 else
     echo "USB was already mounted before backup — leaving it mounted."
 fi
+
+# --- S3 Sync ---
+echo "Syncing to S3..."
+sudo -u "$NOTIFY_USER" rclone sync "$BACKUP_DEST" "$S3_REMOTE" --progress
+echo "S3 sync complete."
+
+notify normal "Backup completed successfully (USB + S3)."

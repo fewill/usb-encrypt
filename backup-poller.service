@@ -1,0 +1,15 @@
+[Unit]
+Description=USB Backup SQS Poller
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=fewill
+WorkingDirectory=/home/fewill/code/usb-encrypt
+ExecStart=/home/fewill/code/usb-encrypt/.venv/bin/python /home/fewill/code/usb-encrypt/poller.py
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
