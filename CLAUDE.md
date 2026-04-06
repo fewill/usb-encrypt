@@ -56,7 +56,7 @@ Encrypted USB backup system for a Linux laptop (fewill-fw13). Backs up local dir
 
 - `.env` holds `OP_SERVICE_ACCOUNT_TOKEN`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_DEFAULT_REGION`
 - `credentials.yml` holds 1Password references for Slack bot token
-- rclone config at `~/.config/rclone/rclone.conf` holds AWS credentials for S3 sync (remote: `s3-backup`)
+- rclone config at `~/.config/rclone/rclone.conf` holds AWS credentials for S3 sync (remote: `fw-fw13`)
 
 ## Backed Up Directories
 
@@ -64,8 +64,14 @@ Encrypted USB backup system for a Linux laptop (fewill-fw13). Backs up local dir
 ~/code
 ~/Documents
 ~/Pictures
+~/Downloads
+~/Desktop
 ~/.ssh
 ~/.config
+~/.local/share
+~/.mozilla
+~/.zoom
+/etc
 ```
 
 ## Common Tasks

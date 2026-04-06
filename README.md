@@ -136,9 +136,16 @@ Results are posted to `#opn-backup`.
 The timer runs daily at midnight. `Persistent=true` ensures it runs at next boot if the machine was off.
 
 ```bash
-systemctl list-timers backup-usb.timer     # verify timer
-journalctl -u backup-usb.service -n 50     # view backup logs
-journalctl -u backup-poller.service -f     # follow poller logs
+systemctl list-timers backup-usb.timer
+```
+
+## Logs
+
+```bash
+journalctl -u backup-usb.service -n 50     # last 50 lines of backup log
+journalctl -u backup-usb.service -f        # follow backup log live
+journalctl -u backup-poller.service -n 50  # last 50 lines of poller log
+journalctl -u backup-poller.service -f     # follow poller log live
 ```
 
 ## Credentials
