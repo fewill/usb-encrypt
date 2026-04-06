@@ -2,37 +2,39 @@
 
 ## Project Overview
 
-Encrypted USB backup system for a Linux laptop (fewill-fw13). Backs up local directories to a LUKS-encrypted USB drive and AWS S3, with Slack notifications and two-way slash command control.
+Encrypted SSD backup system for a Linux laptop (fewill-fw13). Backs up local directories to a LUKS-encrypted Samsung Extreme SSD and AWS S3, with Slack notifications and two-way slash command control.
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
-| `mount-usb.sh` | Unlock and mount `/dev/sdc1` → `/mnt/usb` |
-| `umount-usb.sh` | Unmount and lock the USB drive |
-| `backup-usb.sh` | Full backup: rsync → USB, rclone → S3, Slack notify |
+| `mount-ssd.sh` | Unlock and mount `/dev/sda1` → `/media/fewill/Extreme SSD` |
+| `umount-ssd.sh` | Unmount and lock the SSD |
+| `mount-usb.sh` | Legacy — unlock/mount old USB flash drive (`/dev/sdc1`) |
+| `umount-usb.sh` | Legacy — unmount/lock old USB flash drive |
+| `backup-usb.sh` | Full backup: rsync → SSD, rclone → S3, Slack notify |
 | `backup-usb.service` | systemd service (runs as root) |
 | `backup-usb.timer` | systemd timer (daily at midnight, persistent) |
 | `backup-poller.service` | systemd service for SQS poller (runs as fewill) |
 | `poller.py` | Polls SQS for Slack slash commands, executes them |
 | `notify_slack.py` | Posts messages to #opn-backup via Slack bot |
 | `get_credentials.py` | Resolves credentials from 1Password via credentialsmanager |
-| `credentials.yml` | 1Password secret references for Slack |
+| `credentials.yml` | 1Password secret references for Slack, LUKS, and AWS |
 | `update-scripts.py` | CLI to sync repo files to install locations |
 | `lambda/handler.py` | AWS Lambda — receives /backup slash commands from Slack |
 | `requirements.txt` | Python dependencies |
-| `.env` | Local secrets (not committed) |
+| `.env` | Local secrets (not committed) — only `OP_SERVICE_ACCOUNT_TOKEN` needed |
 
 ## Hardware
 
-- **USB device:** `/dev/sdc1` (LUKS encrypted)
-- **Mapper:** `/dev/mapper/encrypted_usb`
-- **Mount point:** `/mnt/usb`
-- **Backup destination:** `/mnt/usb/backups/`
+- **SSD device:** `/dev/sda1` (LUKS encrypted — Samsung Extreme SSD)
+- **Mapper:** `/dev/mapper/encrypted_ssd`
+- **Mount point:** `/media/fewill/Extreme SSD`
+- **Backup destination:** `/media/fewill/Extreme SSD/backups/`
 
 ## Install Locations
 
-- Scripts: `~/.local/bin/` (mount-usb, umount-usb, backup-usb)
+- Scripts: `~/.local/bin/` (backup-usb)
 - systemd units: `/etc/systemd/system/`
 
 ## AWS Infrastructure
@@ -49,14 +51,21 @@ Encrypted USB backup system for a Linux laptop (fewill-fw13). Backs up local dir
 
 - **Channel:** `#opn-backup`
 - **Slash command:** `/backup [run|status]`
-- **Bot token:** stored in 1Password → `USB Backup / slack_bot_token`
+- **Bot token:** stored in 1Password → `fw-fw13 ssd-encrypt backup / Slack App / bot_token`
 - **Flow:** Slack → API Gateway → Lambda → SQS → poller.py → runs command → notify_slack.py
 
 ## Credentials
 
-- `.env` holds `OP_SERVICE_ACCOUNT_TOKEN`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_DEFAULT_REGION`
-- `credentials.yml` holds 1Password references for Slack bot token
-- rclone config at `~/.config/rclone/rclone.conf` holds AWS credentials for S3 sync (remote: `fw-fw13`)
+All credentials stored in 1Password and referenced via `credentials.yml`:
+
+| Section | Keys | Used By |
+|---------|------|---------|
+| `slack_creds` | `bot_token` | `notify_slack.py` |
+| `luks_creds` | `passphrase` | `backup-usb.sh` (unattended SSD unlock) |
+| `aws_creds` | `access_key_id`, `secret_access_key`, `default_region` | `backup-usb.sh` → rclone |
+
+- `.env` holds only `OP_SERVICE_ACCOUNT_TOKEN` (and optionally AWS keys for poller/SQS)
+- rclone config at `~/.config/rclone/rclone.conf` uses `env_auth=true` (no hardcoded keys, remote: `fw-fw13`)
 
 ## Backed Up Directories
 
@@ -73,6 +82,13 @@ Encrypted USB backup system for a Linux laptop (fewill-fw13). Backs up local dir
 ~/.zoom
 /etc
 ```
+
+**Key excludes:** Trash, 1Password logs, VSCode cache/history, Chrome cache, node_modules, Claude app binaries, Heroku CLI, wcbuild/.pypi, /etc/alternatives, Zoom IPC sockets
+
+## Logs
+
+- File logs: `~/code/usb-encrypt/logs/backup-YYYY-MM-DD_HH-MM-SS.log` (30-day retention)
+- systemd: `journalctl -u backup-usb.service -f`
 
 ## Common Tasks
 
@@ -110,18 +126,28 @@ cd lambda && zip handler.zip handler.py && aws lambda update-function-code --fun
 
 **Test credentials:**
 ```bash
-.venv/bin/python get_credentials.py
+.venv/bin/python get_credentials.py --section luks_creds
+.venv/bin/python get_credentials.py --section aws_creds
+.venv/bin/python get_credentials.py --section slack_creds
+```
+
+**Mount/unmount SSD manually:**
+```bash
+./mount-ssd.sh
+./umount-ssd.sh
 ```
 
 ## Known Issues / Notes
 
 - `backup-usb.service` runs as `root` (required for cryptsetup/mount). The backup script uses hardcoded `USER_HOME=/home/fewill` since `$HOME` would resolve to `/root`.
 - rsync exit code 24 ("some files vanished") is treated as success — this is normal for active directories like `.config`.
-- `sync` is called before unmounting to flush OS write buffers. On a full backup (~13GB) this can take several minutes — the drive light will flash during this time.
+- `sync` is called before unmounting to flush OS write buffers. On a full backup this can take several minutes.
 - The SQS poller uses IAM user credentials from `.env` (not SSO) to avoid session expiry.
 - The Lambda verifies Slack request signatures and decodes base64 body (API Gateway sends base64-encoded bodies).
+- LUKS passphrase is passed via `printf '%s'` (not `echo`) to avoid a trailing newline mismatch.
+- The SSD mount point `/media/fewill/Extreme SSD` is created with `mkdir -p` by the backup script when unlocking manually (the OS only creates it on auto-mount).
 
 ## Dependencies
 
 - `credentialsmanager` installed from `../credentialsmanager` (local package)
-- `rclone` configured with remote `s3-backup` pointing to `opn-usb-backup`
+- `rclone` configured with remote `fw-fw13` pointing to `opn-usb-backup` (env_auth=true)

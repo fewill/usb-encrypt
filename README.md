@@ -1,13 +1,13 @@
 # usb-encrypt
 
-Encrypted USB drive backup system for Linux. Mounts, syncs, and locks a LUKS-encrypted USB drive with daily automated backups to both USB and AWS S3. Includes two-way Slack integration via slash commands.
+Encrypted SSD backup system for Linux. Mounts, syncs, and locks a LUKS-encrypted Samsung Extreme SSD with daily automated backups to both SSD and AWS S3. Includes two-way Slack integration via slash commands.
 
 ## Architecture
 
 ```
 Local machine
-├── mount-usb / umount-usb    — manual mount/unmount scripts
-├── backup-usb                — rsync to USB + rclone to S3 + Slack notification
+├── mount-ssd / umount-ssd    — manual mount/unmount scripts for SSD
+├── backup-usb                — rsync to SSD + rclone to S3 + Slack notification
 ├── backup-usb.timer          — systemd timer (daily at midnight)
 ├── poller.py                 — SQS poller, executes Slack slash commands
 └── notify_slack.py           — posts messages to #opn-backup
@@ -15,7 +15,7 @@ Local machine
 AWS
 ├── SQS: backup-commands      — command queue
 ├── Lambda: backup-slack-handler — receives /backup slash commands
-└── API Gateway               — public HTTPS endpoint for Slack
+├── API Gateway               — public HTTPS endpoint for Slack
 └── S3: opn-usb-backup        — offsite backup destination
 
 Slack
@@ -27,7 +27,7 @@ Slack
 | Copy | Location | Method |
 |------|----------|--------|
 | 1 | Main machine | Source |
-| 2 | Encrypted USB (`/dev/sdc1`) | `rsync` → `/mnt/usb/backups/` |
+| 2 | Encrypted SSD (`/dev/sda1`) | `rsync` → `/media/fewill/Extreme SSD/backups/` |
 | 3 | AWS S3 (`opn-usb-backup`, us-east-2) | `rclone sync` |
 
 ## Backed Up Directories
@@ -35,14 +35,22 @@ Slack
 - `~/code`
 - `~/Documents`
 - `~/Pictures`
+- `~/Downloads`
+- `~/Desktop`
 - `~/.ssh`
 - `~/.config`
+- `~/.local/share`
+- `~/.mozilla`
+- `~/.zoom`
+- `/etc`
+
+**Excluded:** Trash, caches (VSCode, Chrome, 1Password logs), node_modules, Claude app binaries, Heroku CLI, wcbuild/.pypi, /etc/alternatives, Zoom IPC sockets
 
 ## Requirements
 
 **System packages:**
 - `cryptsetup` — LUKS encryption
-- `rsync` — local USB sync
+- `rsync` — local SSD sync
 - `rclone` — S3 sync
 - `python3` — scripts and poller
 - `notify-send` — desktop notifications (optional)
@@ -59,8 +67,7 @@ Slack
 - AWS account with IAM user `usb-backup` (S3 + SQS access)
 - 1Password service account with `OP_SERVICE_ACCOUNT_TOKEN`
 - Slack app with bot token in `#opn-backup`
-- LUKS-encrypted USB partition at `/dev/sdc1`
-- Mount point: `sudo mkdir -p /mnt/usb`
+- LUKS-encrypted SSD partition at `/dev/sda1`
 
 ## Installation
 
@@ -71,10 +78,10 @@ python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 ```
 
-Create `.env`:
+Create `.env` (only the 1Password token is required — all other credentials are resolved via 1Password):
 ```
 OP_SERVICE_ACCOUNT_TOKEN=your_token
-AWS_ACCESS_KEY_ID=your_key_id
+AWS_ACCESS_KEY_ID=your_key_id      # needed for poller.py / SQS only
 AWS_SECRET_ACCESS_KEY=your_secret
 AWS_DEFAULT_REGION=us-east-2
 ```
@@ -101,23 +108,12 @@ sudo systemctl enable --now backup-poller.service
 git pull && .venv/bin/python update-scripts.py
 ```
 
-Update specific targets:
-```bash
-.venv/bin/python update-scripts.py mount-usb umount-usb backup-usb
-.venv/bin/python update-scripts.py backup-usb.service backup-usb.timer backup-poller.service
-```
-
-List all targets:
-```bash
-.venv/bin/python update-scripts.py --list
-```
-
 ## Manual Usage
 
 ```bash
-mount-usb       # unlock and mount
-umount-usb      # unmount and lock
-backup-usb      # full backup (USB + S3 + Slack notification)
+./mount-ssd.sh    # unlock and mount SSD
+./umount-ssd.sh   # unmount and lock SSD
+backup-usb        # full backup (SSD + S3 + Slack notification)
 ```
 
 ## Slack Commands
@@ -142,6 +138,11 @@ systemctl list-timers backup-usb.timer
 ## Logs
 
 ```bash
+# File logs (30-day retention)
+ls ~/code/usb-encrypt/logs/
+cat ~/code/usb-encrypt/logs/backup-YYYY-MM-DD_HH-MM-SS.log
+
+# systemd journal
 journalctl -u backup-usb.service -n 50     # last 50 lines of backup log
 journalctl -u backup-usb.service -f        # follow backup log live
 journalctl -u backup-poller.service -n 50  # last 50 lines of poller log
@@ -150,13 +151,15 @@ journalctl -u backup-poller.service -f     # follow poller log live
 
 ## Credentials
 
-Credentials are stored in 1Password and referenced in `credentials.yml`. Resolved at runtime via `get_credentials.py`.
+All credentials are stored in 1Password and referenced in `credentials.yml`. Resolved at runtime via `get_credentials.py`.
 
-| Credential | 1Password Item | Used By |
-|-----------|---------------|---------|
-| Slack bot token | `USB Backup / slack_bot_token` | `notify_slack.py` |
-| AWS keys | `.env` file | `poller.py`, `rclone` |
-| 1Password token | `.env` file | `get_credentials.py` |
+| Section | Credential | Used By |
+|---------|-----------|---------|
+| `slack_creds` | Slack bot token | `notify_slack.py` |
+| `luks_creds` | LUKS passphrase | `backup-usb.sh` (unattended SSD unlock) |
+| `aws_creds` | AWS access key, secret, region | `backup-usb.sh` → rclone |
+
+rclone is configured with `env_auth=true` — credentials are injected at runtime from 1Password, not stored in `~/.config/rclone/rclone.conf`.
 
 ## AWS Infrastructure
 
