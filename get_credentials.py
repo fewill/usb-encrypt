@@ -29,6 +29,14 @@ SECTIONS = {
     "slack_creds": {
         "bot_token": "SLACK_BOT_TOKEN",
     },
+    "luks_creds": {
+        "passphrase": "LUKS_PASSPHRASE",
+    },
+    "aws_creds": {
+        "access_key_id": "AWS_ACCESS_KEY_ID",
+        "secret_access_key": "AWS_SECRET_ACCESS_KEY",
+        "default_region": "AWS_DEFAULT_REGION",
+    },
 }
 
 
