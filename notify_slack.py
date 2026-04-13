@@ -11,6 +11,7 @@ import os
 import sys
 import argparse
 import logging
+from datetime import datetime, time as dtime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from dotenv import load_dotenv
@@ -40,6 +41,31 @@ URGENCY_EMOJI = {
     "critical": ":rotating_light:",
 }
 
+# Quiet hours: messages sent between QUIET_START and QUIET_END are scheduled
+# for DELIVER_AT instead of sent immediately. Critical messages always send now.
+QUIET_START = dtime(22, 0)   # 10:00 PM
+QUIET_END   = dtime(7, 0)    # 7:00 AM
+DELIVER_AT  = dtime(7, 0)    # 7:00 AM
+
+
+def next_delivery_time() -> int:
+    """Return Unix timestamp for the next 7 AM delivery."""
+    now = datetime.now()
+    target = now.replace(hour=DELIVER_AT.hour, minute=0, second=0, microsecond=0)
+    if now.time() >= DELIVER_AT:
+        # Already past 7 AM today — schedule for tomorrow
+        from datetime import timedelta
+        target += timedelta(days=1)
+    return int(target.timestamp())
+
+
+def in_quiet_hours() -> bool:
+    t = datetime.now().time()
+    if QUIET_START < QUIET_END:
+        return QUIET_START <= t < QUIET_END
+    # Overnight window (e.g. 22:00 – 07:00)
+    return t >= QUIET_START or t < QUIET_END
+
 
 async def get_bot_token() -> str:
     op_token = os.environ.get("OP_SERVICE_ACCOUNT_TOKEN")
@@ -59,8 +85,14 @@ async def get_bot_token() -> str:
 def send_message(bot_token: str, text: str) -> None:
     slack = WebClient(token=bot_token)
     try:
-        resp = slack.chat_postMessage(channel=CHANNEL, text=text)
-        log.info(f"Slack message sent to {CHANNEL} (ts={resp['ts']})")
+        if in_quiet_hours():
+            post_at = next_delivery_time()
+            resp = slack.chat_scheduleMessage(channel=CHANNEL, text=text, post_at=post_at)
+            deliver = datetime.fromtimestamp(post_at).strftime("%H:%M")
+            log.info(f"Slack message scheduled for {deliver} (ts={resp['scheduled_message_id']})")
+        else:
+            resp = slack.chat_postMessage(channel=CHANNEL, text=text)
+            log.info(f"Slack message sent to {CHANNEL} (ts={resp['ts']})")
     except SlackApiError as e:
         log.error(f"Slack message failed: {e.response['error']}")
         raise
@@ -79,7 +111,6 @@ def main() -> None:
 
     emoji = URGENCY_EMOJI.get(args.urgency, "")
     text = f"{emoji} *USB Backup* — {args.message}"
-
     bot_token = asyncio.run(get_bot_token())
     send_message(bot_token, text)
 

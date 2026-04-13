@@ -58,7 +58,6 @@ def run_backup() -> None:
     result = subprocess.run(["sudo", BACKUP_CMD], capture_output=True, text=True)
     if result.returncode == 0:
         log.info("Backup completed successfully.")
-        notify("Backup completed successfully (USB + S3).")
     else:
         log.error(f"Backup failed: {result.stderr}")
         notify(f"Backup failed. Error: {result.stderr[-200:]}", urgency="critical")
