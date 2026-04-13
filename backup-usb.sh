@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-DEVICE="/dev/sda1"
+LUKS_UUID="6f57da7c-0823-47ae-b9d3-cd98c1573dac"
+DEVICE="/dev/disk/by-uuid/$LUKS_UUID"
 MAPPER_NAME="encrypted_ssd"
 MAPPER_DEV="/dev/mapper/$MAPPER_NAME"
 MOUNT_POINT="/media/fewill/Extreme SSD"
@@ -46,9 +47,18 @@ notify() {
 trap 'notify critical "Backup failed. Check: journalctl -u backup-usb.service"' ERR
 
 # --- Mount ---
+LUKS_OPENED_BY_US=false
 MOUNTED_BY_US=false
 
-if [ ! -e "$MAPPER_DEV" ]; then
+# Check if the LUKS device is already open under any mapper name
+DEVICE_BASENAME=$(basename "$(readlink -f "$DEVICE" 2>/dev/null || echo "$DEVICE")")
+ACTIVE_MAPPER=$(lsblk -rno NAME "$DEVICE" 2>/dev/null | grep -v "^${DEVICE_BASENAME}$" | head -1)
+
+if [ -z "$ACTIVE_MAPPER" ]; then
+    if [ ! -b "$DEVICE" ]; then
+        notify critical "SSD not found. Is it plugged in?"
+        exit 1
+    fi
     echo "Fetching LUKS passphrase from 1Password..."
     LUKS_PASSPHRASE=$(sudo -u "$NOTIFY_USER" "$PYTHON" "$REPO_DIR/get_credentials.py" --section luks_creds | grep LUKS_PASSPHRASE | cut -d"'" -f2) || {
         notify critical "Failed to retrieve LUKS passphrase from 1Password."
@@ -56,18 +66,31 @@ if [ ! -e "$MAPPER_DEV" ]; then
     }
     echo "Unlocking $DEVICE..."
     printf '%s' "$LUKS_PASSPHRASE" | cryptsetup open --key-file - "$DEVICE" "$MAPPER_NAME" || {
-        notify critical "USB not found or failed to unlock. Is it plugged in?"
+        notify critical "Failed to unlock SSD. Wrong passphrase?"
         exit 1
     }
     unset LUKS_PASSPHRASE
+    ACTIVE_MAPPER="$MAPPER_NAME"
+    LUKS_OPENED_BY_US=true
+else
+    echo "SSD already unlocked as /dev/mapper/$ACTIVE_MAPPER"
 fi
 
-if ! mountpoint -q "$MOUNT_POINT"; then
-    echo "Mounting $MAPPER_DEV..."
+ACTIVE_MAPPER_DEV="/dev/mapper/$ACTIVE_MAPPER"
+
+# Find existing mount point or mount it ourselves
+CURRENT_MOUNT=$(lsblk -rno MOUNTPOINT "$ACTIVE_MAPPER_DEV" 2>/dev/null | head -1)
+if [ -z "$CURRENT_MOUNT" ]; then
+    echo "Mounting $ACTIVE_MAPPER_DEV..."
     mkdir -p "$MOUNT_POINT"
-    mount "$MAPPER_DEV" "$MOUNT_POINT"
+    mount "$ACTIVE_MAPPER_DEV" "$MOUNT_POINT"
+    CURRENT_MOUNT="$MOUNT_POINT"
     MOUNTED_BY_US=true
+else
+    echo "SSD already mounted at $CURRENT_MOUNT"
 fi
+
+BACKUP_DEST="$CURRENT_MOUNT/backups"
 
 mkdir -p "$BACKUP_DEST"
 
@@ -114,24 +137,30 @@ eval $(sudo -u "$NOTIFY_USER" "$PYTHON" "$REPO_DIR/get_credentials.py" --section
     exit 1
 }
 echo "Syncing to S3..."
-sudo -u "$NOTIFY_USER" \
-    AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" \
+AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" \
     AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
     AWS_DEFAULT_REGION="$AWS_DEFAULT_REGION" \
-    rclone sync "$BACKUP_DEST" "$S3_REMOTE" --progress
+    rclone --config "/home/fewill/.config/rclone/rclone.conf" \
+    sync "$BACKUP_DEST" "$S3_REMOTE" --progress
 unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_DEFAULT_REGION
 echo "S3 sync complete."
 
-# --- Unmount (only if we mounted it) ---
+# --- Unmount (only if we mounted/unlocked it) ---
 if [ "$MOUNTED_BY_US" = true ]; then
     echo "Flushing buffers..."
     sync
-    echo "Unmounting and locking..."
-    umount "$MOUNT_POINT"
-    cryptsetup close "$MAPPER_NAME"
+    echo "Unmounting $CURRENT_MOUNT..."
+    umount "$CURRENT_MOUNT"
+fi
+if [ "$LUKS_OPENED_BY_US" = true ]; then
+    echo "Locking SSD..."
+    cryptsetup close "$ACTIVE_MAPPER"
     echo "Done. Safe to remove SSD."
-else
+fi
+if [ "$MOUNTED_BY_US" = false ] && [ "$LUKS_OPENED_BY_US" = false ]; then
     echo "SSD was already mounted before backup — leaving it mounted."
 fi
 
-notify normal "Backup completed successfully (USB + S3)."
+SUMMARY=$(sudo -u "$NOTIFY_USER" "$PYTHON" "$REPO_DIR/parse_backup_log.py" "$LOG_FILE" "$CURRENT_MOUNT" 2>/dev/null || true)
+notify normal "Backup completed successfully (USB + S3).${SUMMARY:+
+$SUMMARY}"
