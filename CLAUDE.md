@@ -8,7 +8,7 @@ Encrypted SSD backup system for a Linux laptop (fewill-fw13). Backs up local dir
 
 | File | Purpose |
 |------|---------|
-| `mount-ssd.sh` | Unlock and mount `/dev/sda1` → `/media/fewill/Extreme SSD` |
+| `mount-ssd.sh` | Unlock and mount SSD by UUID → `/media/fewill/Extreme SSD` |
 | `umount-ssd.sh` | Unmount and lock the SSD |
 | `mount-usb.sh` | Legacy — unlock/mount old USB flash drive (`/dev/sdc1`) |
 | `umount-usb.sh` | Legacy — unmount/lock old USB flash drive |
@@ -17,7 +17,8 @@ Encrypted SSD backup system for a Linux laptop (fewill-fw13). Backs up local dir
 | `backup-usb.timer` | systemd timer (daily at midnight, persistent) |
 | `backup-poller.service` | systemd service for SQS poller (runs as fewill) |
 | `poller.py` | Polls SQS for Slack slash commands, executes them |
-| `notify_slack.py` | Posts messages to #opn-backup via Slack bot |
+| `notify_slack.py` | Posts messages to #opn-backup via Slack bot (quiet hours aware) |
+| `parse_backup_log.py` | Parses backup log and produces a Slack-ready summary |
 | `get_credentials.py` | Resolves credentials from 1Password via credentialsmanager |
 | `credentials.yml` | 1Password secret references for Slack, LUKS, and AWS |
 | `update-scripts.py` | CLI to sync repo files to install locations |
@@ -27,10 +28,10 @@ Encrypted SSD backup system for a Linux laptop (fewill-fw13). Backs up local dir
 
 ## Hardware
 
-- **SSD device:** `/dev/sda1` (LUKS encrypted — Samsung Extreme SSD)
-- **Mapper:** `/dev/mapper/encrypted_ssd`
-- **Mount point:** `/media/fewill/Extreme SSD`
-- **Backup destination:** `/media/fewill/Extreme SSD/backups/`
+- **SSD device:** `/dev/disk/by-uuid/6f57da7c-0823-47ae-b9d3-cd98c1573dac` (Samsung Extreme SSD, LUKS encrypted)
+- **Preferred mapper:** `/dev/mapper/encrypted_ssd` (used when the script opens the device itself)
+- **Preferred mount point:** `/media/fewill/Extreme SSD`
+- **Backup destination:** `<active_mount>/backups/` (determined dynamically — see Notes)
 
 ## Install Locations
 
@@ -53,6 +54,8 @@ Encrypted SSD backup system for a Linux laptop (fewill-fw13). Backs up local dir
 - **Slash command:** `/backup [run|status]`
 - **Bot token:** stored in 1Password → `fw-fw13 ssd-encrypt backup / Slack App / bot_token`
 - **Flow:** Slack → API Gateway → Lambda → SQS → poller.py → runs command → notify_slack.py
+- **Quiet hours:** 10 PM – 7 AM. Messages sent during this window are scheduled for 7 AM delivery via `chat.scheduleMessage`. All messages (including critical failures) are deferred — there is no bypass.
+- **Completion summary:** `parse_backup_log.py` parses the backup log and appends SSD free space, files transferred, S3 stats, and total elapsed time to the success notification.
 
 ## Credentials
 
@@ -94,7 +97,7 @@ All credentials stored in 1Password and referenced via `credentials.yml`:
 
 **Run a backup manually:**
 ```bash
-sudo systemctl start backup-usb.service
+sudo systemctl start backup-usb.service --no-block
 journalctl -u backup-usb.service -f
 ```
 
@@ -145,7 +148,10 @@ cd lambda && zip handler.zip handler.py && aws lambda update-function-code --fun
 - The SQS poller uses IAM user credentials from `.env` (not SSO) to avoid session expiry.
 - The Lambda verifies Slack request signatures and decodes base64 body (API Gateway sends base64-encoded bodies).
 - LUKS passphrase is passed via `printf '%s'` (not `echo`) to avoid a trailing newline mismatch.
-- The SSD mount point `/media/fewill/Extreme SSD` is created with `mkdir -p` by the backup script when unlocking manually (the OS only creates it on auto-mount).
+- The SSD is referenced by UUID (`/dev/disk/by-uuid/6f57da7c-...`) rather than `/dev/sda1` to survive USB re-enumeration.
+- If the system auto-mounts the SSD before the backup runs (e.g., a desktop session is active), the LUKS mapper will have a different name (e.g., `luks-6f57da7c-...`) and a different mount point. The backup script detects this via `lsblk` and uses whatever mount is active — `BACKUP_DEST` is set dynamically, not hardcoded.
+- rclone runs as root (not `sudo -u fewill`) with `--config /home/fewill/.config/rclone/rclone.conf` so it can read root-owned files backed up from `/etc`.
+- `backup-usb.service` is `Type=oneshot` — `systemctl start` blocks until completion. Use `--no-block` to return immediately.
 
 ## Dependencies
 

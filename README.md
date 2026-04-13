@@ -27,7 +27,7 @@ Slack
 | Copy | Location | Method |
 |------|----------|--------|
 | 1 | Main machine | Source |
-| 2 | Encrypted SSD (`/dev/sda1`) | `rsync` → `/media/fewill/Extreme SSD/backups/` |
+| 2 | Encrypted SSD (by UUID) | `rsync` → `<active_mount>/backups/` |
 | 3 | AWS S3 (`opn-usb-backup`, us-east-2) | `rclone sync` |
 
 ## Backed Up Directories
@@ -133,6 +133,19 @@ The timer runs daily at midnight. `Persistent=true` ensures it runs at next boot
 
 ```bash
 systemctl list-timers backup-usb.timer
+```
+
+## Notifications
+
+Success and failure notifications are posted to `#opn-backup`. Messages sent between **10 PM and 7 AM** are scheduled for 7 AM delivery via Slack's `chat.scheduleMessage` API — no overnight alerts.
+
+Completion notifications include a summary parsed from the backup log:
+
+```
+✅ USB Backup — Backup completed successfully (USB + S3).
+• SSD: 12 dirs synced in 7s — 817 GiB free
+• S3: 1.1 GiB transferred, 1,629 files uploaded, 969,494 checked, 1,214 deleted
+• Total time: 2h54m
 ```
 
 ## Logs

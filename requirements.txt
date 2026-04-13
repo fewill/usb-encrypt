@@ -4,3 +4,4 @@ pyyaml>=6.0
 python-dotenv
 slack-sdk
 boto3
+pytest
