@@ -13,6 +13,8 @@ BIN_DIR = Path.home() / ".local/bin"
 SYSTEMD_DIR = Path("/etc/systemd/system")
 
 BIN_SCRIPTS = {
+    "mount-ssd":  (REPO_DIR / "mount-ssd.sh",      BIN_DIR / "mount-ssd"),
+    "umount-ssd": (REPO_DIR / "umount-ssd.sh",     BIN_DIR / "umount-ssd"),
     "mount-usb":  (REPO_DIR / "mount-usb.sh",      BIN_DIR / "mount-usb"),
     "umount-usb": (REPO_DIR / "umount-usb.sh",     BIN_DIR / "umount-usb"),
     "backup-usb": (REPO_DIR / "backup-usb.sh",     BIN_DIR / "backup-usb"),

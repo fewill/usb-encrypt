@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-DEVICE="/dev/sda1"
+LUKS_UUID="6f57da7c-0823-47ae-b9d3-cd98c1573dac"
+DEVICE="/dev/disk/by-uuid/$LUKS_UUID"
 MAPPER_NAME="encrypted_ssd"
 MAPPER_DEV="/dev/mapper/$MAPPER_NAME"
 MOUNT_POINT="/media/fewill/Extreme SSD"
