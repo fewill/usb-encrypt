@@ -1,6 +1,7 @@
 [Unit]
 Description=Encrypted USB Backup
 Wants=backup-usb.timer
+ConditionPathExists=/dev/disk/by-uuid/6f57da7c-0823-47ae-b9d3-cd98c1573dac
 
 [Service]
 Type=oneshot
@@ -8,4 +9,4 @@ User=root
 ExecStart=/home/fewill/.local/bin/backup-usb
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=timers.target

@@ -143,6 +143,8 @@ cd lambda && zip handler.zip handler.py && aws lambda update-function-code --fun
 ## Known Issues / Notes
 
 - `backup-usb.service` runs as `root` (required for cryptsetup/mount). The backup script uses hardcoded `USER_HOME=/home/fewill` since `$HOME` would resolve to `/root`.
+- `ConditionPathExists=/dev/disk/by-uuid/6f57da7c-...` is set on the service — if the SSD is not plugged in, systemd skips the run silently (no failed state). `WantedBy=timers.target` ensures the service is only activated by the timer, not at every boot independently.
+- `Persistent=true` on the timer means a missed midnight run is caught at next boot — but only runs if the SSD is present (ConditionPathExists guards this).
 - rsync exit code 24 ("some files vanished") is treated as success — this is normal for active directories like `.config`.
 - `sync` is called before unmounting to flush OS write buffers. On a full backup this can take several minutes.
 - The SQS poller uses IAM user credentials from `.env` (not SSO) to avoid session expiry.

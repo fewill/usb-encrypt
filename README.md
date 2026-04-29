@@ -1,4 +1,4 @@
-# usb-encrypt
+# usb-encrypt — daily encrypted backup to LUKS SSD and AWS S3 with Slack slash command control
 
 Encrypted SSD backup system for Linux. Mounts, syncs, and locks a LUKS-encrypted Samsung Extreme SSD with daily automated backups to both SSD and AWS S3. Includes two-way Slack integration via slash commands.
 
@@ -129,7 +129,9 @@ Results are posted to `#opn-backup`.
 
 ## Scheduling
 
-The timer runs daily at midnight. `Persistent=true` ensures it runs at next boot if the machine was off.
+The timer runs daily at midnight. `Persistent=true` ensures it runs at next boot if the machine was off at midnight.
+
+The service has `ConditionPathExists=/dev/disk/by-uuid/6f57da7c-...` — if the SSD is not plugged in, systemd silently skips the run (no failure). Boot-time runs where the SSD is absent are skipped cleanly rather than erroring.
 
 ```bash
 systemctl list-timers backup-usb.timer
