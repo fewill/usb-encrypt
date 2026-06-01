@@ -52,7 +52,7 @@ MOUNTED_BY_US=false
 
 # Check if the LUKS device is already open under any mapper name
 DEVICE_BASENAME=$(basename "$(readlink -f "$DEVICE" 2>/dev/null || echo "$DEVICE")")
-ACTIVE_MAPPER=$(lsblk -rno NAME "$DEVICE" 2>/dev/null | grep -v "^${DEVICE_BASENAME}$" | head -1)
+ACTIVE_MAPPER=$(lsblk -rno NAME "$DEVICE" 2>/dev/null | grep -v "^${DEVICE_BASENAME}$" | head -1) || true
 
 if [ -z "$ACTIVE_MAPPER" ]; then
     if [ ! -b "$DEVICE" ]; then

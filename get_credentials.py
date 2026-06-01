@@ -51,11 +51,22 @@ async def main(sections: list[str]) -> None:
         print("ERROR: OP_SERVICE_ACCOUNT_TOKEN not set in .env", file=sys.stderr)
         sys.exit(1)
 
-    client = await Client.authenticate(
-        auth=op_token,
-        integration_name="USB Backup",
-        integration_version="1.0.0",
-    )
+    last_exc: Exception = RuntimeError("no attempts made")
+    for attempt in range(1, 6):
+        try:
+            client = await Client.authenticate(
+                auth=op_token,
+                integration_name="USB Backup",
+                integration_version="1.0.0",
+            )
+            break
+        except Exception as e:
+            last_exc = e
+            if attempt < 5:
+                print(f"1Password auth failed (attempt {attempt}/5), retrying in 20s: {e}", file=sys.stderr)
+                await asyncio.sleep(20)
+    else:
+        raise last_exc
 
     for section in sections:
         resolved = await resolve_section(section, client)
