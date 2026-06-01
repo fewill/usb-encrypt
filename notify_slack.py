@@ -71,15 +71,24 @@ async def get_bot_token() -> str:
     op_token = os.environ.get("OP_SERVICE_ACCOUNT_TOKEN")
     if not op_token:
         raise EnvironmentError("OP_SERVICE_ACCOUNT_TOKEN not set in .env")
-    client = await Client.authenticate(
-        auth=op_token,
-        integration_name="USB Backup",
-        integration_version="1.0.0",
-    )
-    creds = await resolve_creds_section(
-        read_yaml_section("slack_creds", str(CREDENTIALS_PATH)), client
-    )
-    return creds["bot_token"]
+    last_exc: Exception = RuntimeError("no attempts made")
+    for attempt in range(1, 6):
+        try:
+            client = await Client.authenticate(
+                auth=op_token,
+                integration_name="USB Backup",
+                integration_version="1.0.0",
+            )
+            creds = await resolve_creds_section(
+                read_yaml_section("slack_creds", str(CREDENTIALS_PATH)), client
+            )
+            return creds["bot_token"]
+        except Exception as e:
+            last_exc = e
+            if attempt < 5:
+                log.warning(f"1Password auth failed (attempt {attempt}/5), retrying in 20s: {e}")
+                await asyncio.sleep(20)
+    raise last_exc
 
 
 def send_message(bot_token: str, text: str) -> None:
