@@ -40,7 +40,7 @@ Encrypted SSD backup system for a Linux laptop (fewill-fw13). Backs up local dir
 
 ## AWS Infrastructure
 
-- **S3 bucket:** `opn-usb-backup` (us-east-2, versioning enabled, public access blocked, lifecycle rule: retain 3 noncurrent versions indefinitely)
+- **S3 bucket:** `opn-usb-backup` (us-east-2, versioning enabled, public access blocked, lifecycle rule: retain 3 noncurrent versions — transition to Standard-IA after 30 days, expire after 7 years)
 - **SQS queue:** `backup-commands` (us-east-2)
 - **Lambda:** `backup-slack-handler` (us-east-2, python3.12)
 - **API Gateway:** `backup-slack-api` (id: 888rs3f9x2, us-east-2)

@@ -187,6 +187,18 @@ rclone is configured with `env_auth=true` — credentials are injected at runtim
 | IAM user | `usb-backup` | — |
 | IAM role | `backup-lambda-role` | — |
 
+### S3 Versioning & Retention
+
+Versioning is enabled on `opn-usb-backup`. The lifecycle policy for noncurrent versions:
+
+| Phase | Duration | Storage Class |
+|-------|----------|---------------|
+| Recent | Days 0–30 | Standard |
+| Archive | Days 30–2555 | Standard-IA |
+| Expiry | After 7 years (2555 days) | Deleted |
+
+A maximum of 3 noncurrent versions are retained per object. This aligns with a 7-year retention standard for financial services (SOX / NACHA).
+
 API Gateway endpoint:
 ```
 https://888rs3f9x2.execute-api.us-east-2.amazonaws.com/prod/backup
