@@ -131,18 +131,30 @@ echo "Backup complete — $(date '+%Y-%m-%d %H:%M:%S')"
 echo ""
 
 # --- S3 Sync ---
-echo "Fetching AWS credentials from 1Password..."
-eval $(sudo -u "$NOTIFY_USER" "$PYTHON" "$REPO_DIR/get_credentials.py" --section aws_creds) || {
-    notify critical "Failed to retrieve AWS credentials from 1Password."
+# Cert-based auth via IAM Roles Anywhere — no long-lived AWS keys on disk.
+# usb-backup-role is scoped to only opn-usb-backup (S3) and backup-commands (SQS).
+echo "Fetching AWS credentials via IAM Roles Anywhere..."
+AWS_RA_CERT_DIR="/home/fewill/.config/usb-backup/aws-roles-anywhere"
+CREDS_JSON=$(/home/fewill/.local/bin/aws_signing_helper credential-process \
+    --certificate "$AWS_RA_CERT_DIR/client.crt" \
+    --private-key "$AWS_RA_CERT_DIR/client.key" \
+    --trust-anchor-arn arn:aws:rolesanywhere:us-east-2:864899860638:trust-anchor/5b296f8a-2747-4257-99f6-d3c71a533c81 \
+    --profile-arn arn:aws:rolesanywhere:us-east-2:864899860638:profile/6e3e4653-dd8e-4062-a59a-f543d89f890a \
+    --role-arn arn:aws:iam::864899860638:role/usb-backup-role) || {
+    notify critical "Failed to retrieve AWS credentials via IAM Roles Anywhere."
     exit 1
 }
+AWS_ACCESS_KEY_ID=$(echo "$CREDS_JSON" | "$PYTHON" -c "import json,sys; print(json.load(sys.stdin)['AccessKeyId'])")
+AWS_SECRET_ACCESS_KEY=$(echo "$CREDS_JSON" | "$PYTHON" -c "import json,sys; print(json.load(sys.stdin)['SecretAccessKey'])")
+AWS_SESSION_TOKEN=$(echo "$CREDS_JSON" | "$PYTHON" -c "import json,sys; print(json.load(sys.stdin)['SessionToken'])")
 echo "Syncing to S3..."
 AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" \
     AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
-    AWS_DEFAULT_REGION="$AWS_DEFAULT_REGION" \
+    AWS_SESSION_TOKEN="$AWS_SESSION_TOKEN" \
+    AWS_DEFAULT_REGION=us-east-2 \
     rclone --config "/home/fewill/.config/rclone/rclone.conf" \
     sync "$BACKUP_DEST" "$S3_REMOTE" --progress
-unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_DEFAULT_REGION
+unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_DEFAULT_REGION
 echo "S3 sync complete."
 
 # --- Unmount (only if we mounted/unlocked it) ---

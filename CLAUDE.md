@@ -45,8 +45,9 @@ Encrypted SSD backup system for a Linux laptop (fewill-fw13). Backs up local dir
 - **Lambda:** `backup-slack-handler` (us-east-2, python3.12)
 - **API Gateway:** `backup-slack-api` (id: 888rs3f9x2, us-east-2)
 - **API endpoint:** `https://888rs3f9x2.execute-api.us-east-2.amazonaws.com/prod/backup`
-- **IAM user:** `usb-backup` (AmazonS3FullAccess, AmazonSQSFullAccess)
-- **IAM role:** `backup-lambda-role` (AWSLambdaBasicExecutionRole, AmazonSQSFullAccess)
+- **IAM role:** `usb-backup-role` — scoped to `opn-usb-backup` (S3: List/Get/Put/Delete/multipart) and `backup-commands` (SQS: Receive/Delete/GetQueueAttributes/GetQueueUrl) only. Assumed via IAM Roles Anywhere (self-managed CA, cert at `~/.config/usb-backup/aws-roles-anywhere/`) — no long-lived AWS keys on disk. `backup-usb.sh` mints short-lived creds via `aws_signing_helper credential-process` before each rclone sync; `poller.py` picks it up automatically via `AWS_PROFILE=usb-backup` (set in `backup-poller.service`), through boto3's default credential chain.
+- **IAM role:** `backup-lambda-role` (AWSLambdaBasicExecutionRole, AmazonSQSFullAccess) — Lambda's own execution role, unrelated to the above
+- **Retired:** IAM user `usb-backup` (AmazonS3FullAccess, AmazonSQSFullAccess) — replaced by `usb-backup-role` above. Deactivate/delete this user's access key once the new setup is confirmed stable (also closes an earlier leak: this key had ended up in plaintext in `../opn-support/.claude/settings.local.json`).
 
 ## Slack Integration
 

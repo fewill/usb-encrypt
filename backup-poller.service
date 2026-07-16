@@ -7,6 +7,7 @@ Wants=network-online.target
 Type=simple
 User=fewill
 WorkingDirectory=/home/fewill/code/usb-encrypt
+Environment=AWS_PROFILE=usb-backup
 ExecStart=/home/fewill/code/usb-encrypt/.venv/bin/python /home/fewill/code/usb-encrypt/poller.py
 Restart=on-failure
 RestartSec=10
