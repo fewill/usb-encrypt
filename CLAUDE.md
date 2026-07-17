@@ -46,6 +46,8 @@ Encrypted SSD backup system for a Linux laptop (fewill-fw13). Backs up local dir
 - **API Gateway:** `backup-slack-api` (id: 888rs3f9x2, us-east-2)
 - **API endpoint:** `https://888rs3f9x2.execute-api.us-east-2.amazonaws.com/prod/backup`
 - **IAM role:** `usb-backup-role` — scoped to `opn-usb-backup` (S3: List/Get/Put/Delete/multipart) and `backup-commands` (SQS: Receive/Delete/GetQueueAttributes/GetQueueUrl) only. Assumed via IAM Roles Anywhere (self-managed CA, cert at `~/.config/usb-backup/aws-roles-anywhere/`) — no long-lived AWS keys on disk. `backup-usb.sh` mints short-lived creds via `aws_signing_helper credential-process` before each rclone sync; `poller.py` picks it up automatically via `AWS_PROFILE=usb-backup` (set in `backup-poller.service`), through boto3's default credential chain.
+  - Trust anchor: `arn:aws:rolesanywhere:us-east-2:864899860638:trust-anchor/5b296f8a-2747-4257-99f6-d3c71a533c81`, profile: `arn:aws:rolesanywhere:us-east-2:864899860638:profile/6e3e4653-dd8e-4062-a59a-f543d89f890a`
+  - **Session duration: 12 hours (43200s)** — set on both the Roles Anywhere profile's `durationSeconds` and the role's `MaxSessionDuration`, *and* passed explicitly via `--session-duration 43200` on the `aws_signing_helper` call in `backup-usb.sh`. All three must agree; `aws_signing_helper` defaults to 3600s regardless of the profile/role config if the flag is omitted. The original 1-hour default caused a backup failure on 2026-07-16 — the S3 sync routinely takes 3-4 hours to walk ~1M objects, so the token expired mid-run and the sync spent ~20 hours retrying against an expired token before giving up.
 - **IAM role:** `backup-lambda-role` (AWSLambdaBasicExecutionRole, AmazonSQSFullAccess) — Lambda's own execution role, unrelated to the above
 - **Retired:** IAM user `usb-backup` (AmazonS3FullAccess, AmazonSQSFullAccess) — replaced by `usb-backup-role` above. Deactivate/delete this user's access key once the new setup is confirmed stable (also closes an earlier leak: this key had ended up in plaintext in `../opn-support/.claude/settings.local.json`).
 
@@ -66,9 +68,10 @@ All credentials stored in 1Password and referenced via `credentials.yml`:
 |---------|------|---------|
 | `slack_creds` | `bot_token` | `notify_slack.py` |
 | `luks_creds` | `passphrase` | `backup-usb.sh` (unattended SSD unlock) |
-| `aws_creds` | `access_key_id`, `secret_access_key`, `default_region` | `backup-usb.sh` → rclone |
 
-- `.env` holds only `OP_SERVICE_ACCOUNT_TOKEN` (and optionally AWS keys for poller/SQS)
+`aws_creds` (in `credentials.yml`) is unused/legacy — AWS auth is now cert-based via IAM Roles Anywhere (see AWS Infrastructure above), not resolved from 1Password. Left in place for reference but not read by any script.
+
+- `.env` holds only `OP_SERVICE_ACCOUNT_TOKEN` — AWS auth for both `backup-usb.sh` and `poller.py` is cert-based via IAM Roles Anywhere, not `.env`
 - rclone config at `~/.config/rclone/rclone.conf` uses `env_auth=true` (no hardcoded keys, remote: `fw-fw13`)
 
 ## Backed Up Directories
@@ -131,8 +134,18 @@ cd lambda && zip handler.zip handler.py && aws lambda update-function-code --fun
 **Test credentials:**
 ```bash
 .venv/bin/python get_credentials.py --section luks_creds
-.venv/bin/python get_credentials.py --section aws_creds
 .venv/bin/python get_credentials.py --section slack_creds
+```
+
+**Test AWS Roles Anywhere credentials:**
+```bash
+aws_signing_helper credential-process \
+    --certificate ~/.config/usb-backup/aws-roles-anywhere/client.crt \
+    --private-key ~/.config/usb-backup/aws-roles-anywhere/client.key \
+    --trust-anchor-arn arn:aws:rolesanywhere:us-east-2:864899860638:trust-anchor/5b296f8a-2747-4257-99f6-d3c71a533c81 \
+    --profile-arn arn:aws:rolesanywhere:us-east-2:864899860638:profile/6e3e4653-dd8e-4062-a59a-f543d89f890a \
+    --role-arn arn:aws:iam::864899860638:role/usb-backup-role \
+    --session-duration 43200
 ```
 
 **Mount/unmount SSD manually:**
@@ -148,7 +161,7 @@ cd lambda && zip handler.zip handler.py && aws lambda update-function-code --fun
 - `Persistent=true` on the timer means a missed midnight run is caught at next boot — but only runs if the SSD is present (ConditionPathExists guards this).
 - rsync exit code 24 ("some files vanished") is treated as success — this is normal for active directories like `.config`.
 - `sync` is called before unmounting to flush OS write buffers. On a full backup this can take several minutes.
-- The SQS poller uses IAM user credentials from `.env` (not SSO) to avoid session expiry.
+- The SQS poller authenticates via IAM Roles Anywhere (`AWS_PROFILE=usb-backup`, set in `backup-poller.service`) — same cert-based short-lived session as `backup-usb.sh`, not IAM user keys.
 - The Lambda verifies Slack request signatures and decodes base64 body (API Gateway sends base64-encoded bodies).
 - LUKS passphrase is passed via `printf '%s'` (not `echo`) to avoid a trailing newline mismatch.
 - The SSD is referenced by UUID (`/dev/disk/by-uuid/6f57da7c-...`) rather than `/dev/sda1` to survive USB re-enumeration.

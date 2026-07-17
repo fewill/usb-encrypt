@@ -64,7 +64,7 @@ Slack
 - `pyyaml` — credentials YAML parsing
 
 **Infrastructure:**
-- AWS account with IAM user `usb-backup` (S3 + SQS access)
+- AWS account with IAM role `usb-backup-role` (S3 + SQS access), assumed via IAM Roles Anywhere with a client cert — no long-lived AWS keys
 - 1Password service account with `OP_SERVICE_ACCOUNT_TOKEN`
 - Slack app with bot token in `#opn-backup`
 - LUKS-encrypted SSD partition at `/dev/sda1`
@@ -78,13 +78,12 @@ python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 ```
 
-Create `.env` (only the 1Password token is required — all other credentials are resolved via 1Password):
+Create `.env` (only the 1Password token is required — LUKS and Slack credentials are resolved via 1Password):
 ```
 OP_SERVICE_ACCOUNT_TOKEN=your_token
-AWS_ACCESS_KEY_ID=your_key_id      # needed for poller.py / SQS only
-AWS_SECRET_ACCESS_KEY=your_secret
-AWS_DEFAULT_REGION=us-east-2
 ```
+
+AWS auth is cert-based (IAM Roles Anywhere), not `.env` keys — place the client cert/key at `~/.config/usb-backup/aws-roles-anywhere/` and add the `usb-backup` profile to `~/.aws/config` (see AWS Infrastructure below).
 
 Add `~/.local/bin` to PATH if needed:
 ```bash
@@ -166,15 +165,14 @@ journalctl -u backup-poller.service -f     # follow poller log live
 
 ## Credentials
 
-All credentials are stored in 1Password and referenced in `credentials.yml`. Resolved at runtime via `get_credentials.py`.
+Slack and LUKS credentials are stored in 1Password and referenced in `credentials.yml`, resolved at runtime via `get_credentials.py`.
 
 | Section | Credential | Used By |
 |---------|-----------|---------|
 | `slack_creds` | Slack bot token | `notify_slack.py` |
 | `luks_creds` | LUKS passphrase | `backup-usb.sh` (unattended SSD unlock) |
-| `aws_creds` | AWS access key, secret, region | `backup-usb.sh` → rclone |
 
-rclone is configured with `env_auth=true` — credentials are injected at runtime from 1Password, not stored in `~/.config/rclone/rclone.conf`.
+AWS credentials are **not** in 1Password. `backup-usb.sh` mints a short-lived session via IAM Roles Anywhere (`aws_signing_helper credential-process`, cert at `~/.config/usb-backup/aws-roles-anywhere/`) and exports it as env vars before calling rclone; `poller.py` picks up the same role via `AWS_PROFILE=usb-backup`. rclone is configured with `env_auth=true` — it reads whatever AWS env vars are already set, rather than storing keys in `~/.config/rclone/rclone.conf`.
 
 ## AWS Infrastructure
 
@@ -184,8 +182,10 @@ rclone is configured with `env_auth=true` — credentials are injected at runtim
 | SQS queue | `backup-commands` | us-east-2 |
 | Lambda | `backup-slack-handler` | us-east-2 |
 | API Gateway | `backup-slack-api` | us-east-2 |
-| IAM user | `usb-backup` | — |
+| IAM role | `usb-backup-role` | — |
 | IAM role | `backup-lambda-role` | — |
+
+`usb-backup-role` is assumed via IAM Roles Anywhere (self-managed CA) — scoped to `opn-usb-backup` (S3) and `backup-commands` (SQS) only, no long-lived keys. Session duration is 12 hours (both the Roles Anywhere profile and the role's `MaxSessionDuration` are set to 43200s) so it comfortably outlasts a full S3 sync, which routinely takes 3–4 hours.
 
 ### S3 Versioning & Retention
 
