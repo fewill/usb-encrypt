@@ -140,7 +140,8 @@ CREDS_JSON=$(/home/fewill/.local/bin/aws_signing_helper credential-process \
     --private-key "$AWS_RA_CERT_DIR/client.key" \
     --trust-anchor-arn arn:aws:rolesanywhere:us-east-2:864899860638:trust-anchor/5b296f8a-2747-4257-99f6-d3c71a533c81 \
     --profile-arn arn:aws:rolesanywhere:us-east-2:864899860638:profile/6e3e4653-dd8e-4062-a59a-f543d89f890a \
-    --role-arn arn:aws:iam::864899860638:role/usb-backup-role) || {
+    --role-arn arn:aws:iam::864899860638:role/usb-backup-role \
+    --session-duration 43200) || {
     notify critical "Failed to retrieve AWS credentials via IAM Roles Anywhere."
     exit 1
 }
