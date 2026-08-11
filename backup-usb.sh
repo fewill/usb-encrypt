@@ -44,6 +44,24 @@ notify() {
         --urgency "$urgency" "$message" || true
 }
 
+# A USB re-enumeration (the SSD dropping off the bus and coming back as a new
+# device) leaves the old mount listed in /proc/mounts with its backing device
+# gone. Every read then returns EIO, but nothing unmounts it — so a probe has
+# to actually touch the filesystem, not just check that it is still mounted.
+# The probe lives outside "$BACKUP_DEST" so rclone never sees it.
+dest_alive() {
+    mountpoint -q "$CURRENT_MOUNT" 2>/dev/null \
+        && touch "$CURRENT_MOUNT/.backup-alive" 2>/dev/null \
+        && rm -f "$CURRENT_MOUNT/.backup-alive" 2>/dev/null
+}
+
+require_dest_alive() {
+    if ! dest_alive; then
+        notify critical "SSD at $CURRENT_MOUNT stopped responding ($1) — it likely dropped off the USB bus. Backup aborted."
+        exit 1
+    fi
+}
+
 trap 'notify critical "Backup failed. Check: journalctl -u backup-usb.service"' ERR
 
 # --- Mount ---
@@ -92,6 +110,8 @@ fi
 
 BACKUP_DEST="$CURRENT_MOUNT/backups"
 
+require_dest_alive "before starting"
+
 mkdir -p "$BACKUP_DEST"
 
 # --- Sync ---
@@ -130,6 +150,8 @@ echo "----------------------------------------"
 echo "Backup complete — $(date '+%Y-%m-%d %H:%M:%S')"
 echo ""
 
+require_dest_alive "after rsync, before S3 sync"
+
 # --- S3 Sync ---
 # Cert-based auth via IAM Roles Anywhere — no long-lived AWS keys on disk.
 # usb-backup-role is scoped to only opn-usb-backup (S3) and backup-commands (SQS).
@@ -154,8 +176,39 @@ AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" \
     AWS_SESSION_TOKEN="$AWS_SESSION_TOKEN" \
     AWS_DEFAULT_REGION=us-east-2 \
     rclone --config "/home/fewill/.config/rclone/rclone.conf" \
-    sync "$BACKUP_DEST" "$S3_REMOTE" --progress
+    sync "$BACKUP_DEST" "$S3_REMOTE" --progress &
+RCLONE_PID=$!
+
+# Watchdog: the S3 sync walks ~1M objects over several hours. If the SSD drops
+# off the bus partway through, rclone reads EIO forever and burns the whole
+# retry budget against a dead mount (2026-08-10: 5,240 errors over 10 hours).
+# Probe once a minute and kill the sync as soon as the source stops responding.
+DEST_DIED=false
+while kill -0 "$RCLONE_PID" 2>/dev/null; do
+    sleep 60
+    kill -0 "$RCLONE_PID" 2>/dev/null || break
+    if ! dest_alive; then
+        echo "ERROR: SSD at $CURRENT_MOUNT stopped responding — killing S3 sync."
+        DEST_DIED=true
+        kill -TERM "$RCLONE_PID" 2>/dev/null || true
+        sleep 5
+        kill -KILL "$RCLONE_PID" 2>/dev/null || true
+        break
+    fi
+done
+
+RCLONE_RC=0
+wait "$RCLONE_PID" || RCLONE_RC=$?
 unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_DEFAULT_REGION
+
+if [ "$DEST_DIED" = true ]; then
+    notify critical "SSD dropped off the USB bus during the S3 sync. Local backup to SSD completed; S3 is stale. Re-run once the drive is stable."
+    exit 1
+fi
+if [ "$RCLONE_RC" -ne 0 ]; then
+    echo "rclone exited with status $RCLONE_RC"
+    exit "$RCLONE_RC"
+fi
 echo "S3 sync complete."
 
 # --- Unmount (only if we mounted/unlocked it) ---
