@@ -18,3 +18,6 @@ __pycache__/
 
 # Logs
 logs/
+
+# Lambda deploy artifact — rebuilt by the zip step in CLAUDE.md
+lambda/handler.zip
