@@ -14,6 +14,11 @@ from pathlib import Path
 
 TIMESTAMP_FMT = "%Y-%m-%d %H:%M:%S"
 
+# Runs have logged anywhere from ~237 to ~13,916 "Forbidden" errors (unexplained,
+# pre-existing, self-heals on rclone's retry — see CLAUDE.md). 15,000 sits above
+# that whole historical range, so crossing it flags something worth a look.
+ERROR_REVIEW_THRESHOLD = 15_000
+
 
 def parse_log(path: Path) -> dict:
     text = path.read_text(errors="replace")
@@ -144,6 +149,12 @@ def build_summary(data: dict, mount_point: str | None = None) -> str:
     # Total elapsed
     if "s3_elapsed" in data:
         lines.append(f"• Total time: {data['s3_elapsed']}")
+
+    if errors > ERROR_REVIEW_THRESHOLD:
+        lines.append(
+            f"⚠️ *{fmt_count(errors)} errors is well above the usual range — "
+            "worth reviewing with Claude.*"
+        )
 
     return "\n".join(lines)
 
