@@ -176,10 +176,7 @@ AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" \
     AWS_SESSION_TOKEN="$AWS_SESSION_TOKEN" \
     AWS_DEFAULT_REGION=us-east-2 \
     rclone --config "/home/fewill/.config/rclone/rclone.conf" \
-    sync "$BACKUP_DEST" "$S3_REMOTE" --progress -vv &
-    # -vv: temporary, to catch the actual HTTP method/pacer detail behind the
-    # 2026-09-01 spike to 30,835 "Forbidden" errors in one sync (usually ~1-15k).
-    # Remove once a cause is confirmed — this can add hundreds of MB per run.
+    sync "$BACKUP_DEST" "$S3_REMOTE" --progress &
 RCLONE_PID=$!
 
 # Watchdog: the S3 sync walks ~1M objects over several hours. If the SSD drops
